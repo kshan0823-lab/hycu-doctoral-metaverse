@@ -140,8 +140,10 @@ select option { background: #111d26; }
 .notice-board-feedback { margin-top: 8px; padding: 6px 8px; border: 1px solid rgba(111,186,149,.25); border-radius: 6px; background: rgba(111,186,149,.09); color: #a8d8b6; font-size: 8px; line-height: 1.45; }
 .notice-board-hint { margin-top: 7px; color: #849497; font-size: 8px; }
 .attendance-panel { position: absolute; z-index: 4; left: 14px; bottom: 58px; width: min(350px, 42%); padding: 11px; border: 1px solid rgba(216,192,154,.27); border-radius: 11px; background: rgba(15,27,35,.94); color: #f0e7d8; box-shadow: 0 15px 34px rgba(0,0,0,.24); backdrop-filter: blur(12px); }
+.attendance-panel.collapsed { max-height: 60px; }
 .attendance-panel-heading { display: flex; align-items: end; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(216,192,154,.18); }
 .attendance-panel-heading > div { display: grid; gap: 3px; }
+.attendance-panel-heading-actions { display: flex; align-items: center; gap: 8px; }
 .attendance-kicker { color: #c5a16b; font-size: 8px; letter-spacing: .16em; }
 .attendance-panel-heading strong { color: #f3e8d6; font-size: 12px; }
 .attendance-my-status { color: #b7c1bd; font-size: 8px; white-space: nowrap; }
