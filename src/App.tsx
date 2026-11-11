@@ -76,6 +76,28 @@ const initialAnnouncements: Announcement[] = [
   { id: 2, category: '논문지도', title: '박사논문 지도 일정 확인', author: '과목운영책임 교수', createdAt: '2026-11-10', content: '<h2>논문지도 일정</h2><p>교수 연구실의 논문지도 메뉴에서 연구계획서 버전과 지도 의견을 확인할 수 있습니다.</p><p>개인 상담이 필요한 연구생은 연구실 입장 대화창에 <strong>신청</strong>을 남겨 주세요.</p>', pinned: false },
   { id: 3, category: '시설 이용', title: '개인 공간 출입 안내', author: '캠퍼스 운영팀', createdAt: '2026-11-09', content: '<h2>개인 공간 이용 수칙</h2><p>교수 오피스텔, 개인 휴게실, 화장실·샤워실은 담당자 본인 외 입장이 제한됩니다.</p><ol><li>공용 공간은 자유롭게 이용합니다.</li><li>독립 공간은 담당자 허락을 먼저 받습니다.</li><li>시설 이용 후에는 원래 상태로 정리합니다.</li></ol>', pinned: false },
 ]
+
+function parseSavedAnnouncements(raw: string | null) {
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return null
+    if (!parsed.every((item) => {
+      if (!item || typeof item !== 'object') return false
+      const announcement = item as Partial<Announcement>
+      return typeof announcement.id === 'number'
+        && typeof announcement.category === 'string'
+        && typeof announcement.title === 'string'
+        && typeof announcement.author === 'string'
+        && typeof announcement.createdAt === 'string'
+        && typeof announcement.content === 'string'
+        && typeof announcement.pinned === 'boolean'
+    })) return null
+    return parsed as Announcement[]
+  } catch {
+    return null
+  }
+}
 const resourceCatalog: Resource[] = [
   { title: '가상 연구자료 · 도시재생 사업성 검토', type: 'PDF 시연 자료', year: '2026', keywords: '도시재생, 사업성, 필지', access: '공개 데모', source: 'HYCU 연구캠퍼스 시연 데이터' },
   { title: '가상 연구자료 · 공간구조와 보행 네트워크', type: '텍스트 메모', year: '2026', keywords: '공간구조, 보행, 네트워크', access: '수업 참여자', source: '가상 수업 자료' },
@@ -788,6 +810,7 @@ function App() {
   const [announcements, setAnnouncements] = useState<Announcement[]>(initialAnnouncements)
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [announcementEditor, setAnnouncementEditor] = useState<Announcement | 'new' | null>(null)
+  const [announcementFeedback, setAnnouncementFeedback] = useState('')
   const [presenceCollapsed, setPresenceCollapsed] = useState(false)
 
   const selectedRoom = rooms.find((room) => room.roomId === selectedRoomId) ?? rooms[0]
@@ -862,9 +885,8 @@ function App() {
 
   useEffect(() => {
     const saved = window.localStorage.getItem('hycu-demo-announcements')
-    if (saved) {
-      try { setAnnouncements(JSON.parse(saved) as Announcement[]) } catch { /* demo data only */ }
-    }
+    const parsed = parseSavedAnnouncements(saved)
+    if (parsed) setAnnouncements(parsed)
   }, [])
 
   const moveIntoRoom = (room: RoomSpec) => {
@@ -1135,7 +1157,11 @@ function App() {
 
   const saveAnnouncements = (next: Announcement[]) => {
     setAnnouncements(next)
-    window.localStorage.setItem('hycu-demo-announcements', JSON.stringify(next))
+    try {
+      window.localStorage.setItem('hycu-demo-announcements', JSON.stringify(next))
+    } catch {
+      setAnnouncementFeedback('게시판에는 반영했지만 브라우저 저장 공간을 사용할 수 없습니다.')
+    }
   }
 
   const saveAnnouncement = (draft: Announcement) => {
@@ -1156,7 +1182,8 @@ function App() {
       : [savedAnnouncement, ...announcements]
     saveAnnouncements(next)
     setAnnouncementEditor(null)
-    setSelectedAnnouncement(savedAnnouncement)
+    setSelectedAnnouncement(null)
+    setAnnouncementFeedback(draft.id ? '공지글을 수정했습니다. 게시판 목록을 갱신했습니다.' : '새 공지글을 등록했습니다. 게시판 목록에 반영했습니다.')
   }
 
   const deleteAnnouncement = (id: number) => {
@@ -1164,6 +1191,7 @@ function App() {
     saveAnnouncements(announcements.filter((announcement) => announcement.id !== id))
     setSelectedAnnouncement(null)
     setAnnouncementEditor(null)
+    setAnnouncementFeedback('공지글을 삭제했습니다. 알림터 게시판은 계속 사용할 수 있습니다.')
   }
 
   const handleSit = () => {
@@ -1179,7 +1207,7 @@ function App() {
     <header className="topbar"><div className="topbar-brand"><div className="brand-mark small">HYCU <span>DRC</span></div><div><strong>박사논문 연구캠퍼스</strong><small>가상 연구캠퍼스 시연</small></div></div><div className="topbar-status"><StatusPill tone="good">● 데모 정상 작동</StatusPill><StatusPill tone="warn">외부 연결 없음</StatusPill><button className="quiet-button" onClick={() => setViewMode(viewMode === '3d' ? '2d' : '3d')}>{viewMode === '3d' ? '2D 접근 화면' : '3D 공간으로 돌아가기'}</button></div></header>
     <div className="workspace">
       <aside className="sidebar left-sidebar"><div className="user-card"><div className="avatar-badge">{selectedCharacter.emoji}</div><div><strong>{displayName}</strong><small>{entryMode === 'visitor' ? '방문자' : selectedRole.label} · {selectedCharacter.label}</small></div><span className="online-dot" /></div><div className="side-section-heading"><span>캠퍼스 구역</span><span className="count-badge">{rooms.length}</span></div><div className="search-box"><span>⌕</span><input placeholder="구역 이름 검색" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="room-list">{filteredRooms.map((room) => <button key={room.roomId} className={`room-item ${selectedRoom.roomId === room.roomId ? 'active' : ''}`} onClick={() => goToRoom(room.roomId)}><span className="room-dot" style={{ backgroundColor: palette[room.theme] ?? accent }} /><span className="room-text"><strong>{room.labelKo}</strong><small>{room.kind === 'fitness' ? '웰니스동' : room.kind === 'private-washroom' ? '개인시설' : room.kind === 'professor-lounge' ? '교수동' : room.kind === 'research' ? '연구동' : room.kind === 'amphitheater' || room.kind === 'global' || room.kind === 'library' ? '학습동' : room.kind === 'lounge' || room.kind === 'cafe' || room.kind === 'garden' || room.kind === 'quiet' ? '교류동' : '연구동'}</small></span>{room.seatCount > 0 && <span className="room-seat-count">{room.seatCount}</span>}</button>)}</div><div className="sidebar-footer"><button className="mini-action" onClick={() => { setResetToken((value) => value + 1); setSelectedRoomId('lobby'); setAvatarPosition([0, .05, 3]) }}>◎ 전체 조망</button><label className="quality-select">화면 품질<select value={quality} onChange={(event) => setQuality(event.target.value as '높음' | '보통' | '낮음')}><option>높음</option><option>보통</option><option>낮음</option></select></label></div></aside>
-      <main className="main-stage"><div className="stage-toolbar"><div><span className="eyebrow">CURRENT LOCATION</span><h2>{selectedRoom.labelKo}</h2></div><div className="toolbar-actions"><span className="coord-chip">{selectedRoom.kind === 'lobby' ? '캠퍼스 전체 보기' : '선택 구역 입실'}</span>{selectedRoom.seatCount > 0 && <button className="toolbar-tool" onClick={() => setPanel('seat')}>좌석</button>}{['library', 'professor', 'amphitheater', 'global', 'defense', 'lab', 'research'].includes(selectedRoom.kind) && <button className="toolbar-tool" onClick={() => setPanel('resources')}>자료</button>}{selectedRoom.kind === 'professor' && <button className="toolbar-tool" onClick={() => setPanel('guidance')}>지도</button>}<button className="icon-button" title="카메라 초기화" onClick={() => setResetToken((value) => value + 1)}>↻</button></div></div>{viewMode === '3d' ? <div className="canvas-frame"><SceneView selectedRoomId={selectedRoomId} avatarPosition={avatarPosition} avatarCharacterId={characterId} displayName={displayName} resetToken={resetToken} quality={quality} onRoomSelect={goToRoom} onSeatSelect={selectRestrictedSeat} onAvatarMove={setAvatarPosition} /><div className="canvas-badge"><span className="live-dot" /> 실제 3D 공간 · {rooms.length}개 구역</div><AnnouncementBoard announcements={sortedAnnouncements} canManage={canManageAnnouncements} onOpen={setSelectedAnnouncement} onNew={() => setAnnouncementEditor('new')} /><div className={`visitor-presence ${presenceCollapsed ? 'collapsed' : ''}`} aria-label="현재 입장자 위치"><div className="presence-heading"><span>현재 입장자 위치</span><div className="presence-heading-actions"><small>1명</small><button type="button" className="panel-toggle" aria-expanded={!presenceCollapsed} onClick={() => setPresenceCollapsed((value) => !value)}>{presenceCollapsed ? '펼치기' : '접기'}</button></div></div>{!presenceCollapsed && <div className="presence-list"><div className="presence-person mine"><span className="presence-emoji">{selectedCharacter.emoji}</span><span><strong>{displayName}</strong></span></div></div>}</div><AttendancePanel currentStatus={activeAttendance?.status ?? 'current'} counts={attendanceCounts} onChange={changeMyAttendanceStatus} /><div className="canvas-help"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 <span>·</span> 왼쪽 마우스를 좌우·위아래로 드래그해 화면 이동 <span>·</span> 휠 위·아래로 전체 공간 확대·축소 <span>·</span> 바닥 클릭·끌기로 아바타 이동 <span>·</span> 좌석 클릭</div><div className="reference-controls" aria-label="아바타 이동 조작"><button aria-label="앞으로 이동" onClick={() => moveAvatar(0, -1.15)}>↑</button><div><button aria-label="왼쪽 이동" onClick={() => moveAvatar(-1.15, 0)}>←</button><button className="sit-control" aria-label="앉기" onClick={handleSit}>앉기</button><button aria-label="오른쪽 이동" onClick={() => moveAvatar(1.15, 0)}>→</button></div><button aria-label="뒤로 이동" onClick={() => moveAvatar(0, 1.15)}>↓</button></div><div className="reference-caption">{selectedCharacter.emoji} {displayName} · 머리 위 이름표 · 마우스 이동 가능</div></div> : <TwoDView rooms={rooms} selectedRoomId={selectedRoomId} onRoomSelect={goToRoom} onOpenResources={() => setPanel('resources')} onOpenGuidance={() => setPanel('guidance')} />}</main>
+      <main className="main-stage"><div className="stage-toolbar"><div><span className="eyebrow">CURRENT LOCATION</span><h2>{selectedRoom.labelKo}</h2></div><div className="toolbar-actions"><span className="coord-chip">{selectedRoom.kind === 'lobby' ? '캠퍼스 전체 보기' : '선택 구역 입실'}</span>{selectedRoom.seatCount > 0 && <button className="toolbar-tool" onClick={() => setPanel('seat')}>좌석</button>}{['library', 'professor', 'amphitheater', 'global', 'defense', 'lab', 'research'].includes(selectedRoom.kind) && <button className="toolbar-tool" onClick={() => setPanel('resources')}>자료</button>}{selectedRoom.kind === 'professor' && <button className="toolbar-tool" onClick={() => setPanel('guidance')}>지도</button>}<button className="icon-button" title="카메라 초기화" onClick={() => setResetToken((value) => value + 1)}>↻</button></div></div>{viewMode === '3d' ? <div className="canvas-frame"><SceneView selectedRoomId={selectedRoomId} avatarPosition={avatarPosition} avatarCharacterId={characterId} displayName={displayName} resetToken={resetToken} quality={quality} onRoomSelect={goToRoom} onSeatSelect={selectRestrictedSeat} onAvatarMove={setAvatarPosition} /><div className="canvas-badge"><span className="live-dot" /> 실제 3D 공간 · {rooms.length}개 구역</div><AnnouncementBoard announcements={sortedAnnouncements} canManage={canManageAnnouncements} feedback={announcementFeedback} onOpen={(announcement) => { setAnnouncementFeedback(''); setSelectedAnnouncement(announcement) }} onNew={() => { setAnnouncementFeedback(''); setAnnouncementEditor('new') }} /><div className={`visitor-presence ${presenceCollapsed ? 'collapsed' : ''}`} aria-label="현재 입장자 위치"><div className="presence-heading"><span>현재 입장자 위치</span><div className="presence-heading-actions"><small>1명</small><button type="button" className="panel-toggle" aria-expanded={!presenceCollapsed} onClick={() => setPresenceCollapsed((value) => !value)}>{presenceCollapsed ? '펼치기' : '접기'}</button></div></div>{!presenceCollapsed && <div className="presence-list"><div className="presence-person mine"><span className="presence-emoji">{selectedCharacter.emoji}</span><span><strong>{displayName}</strong></span></div></div>}</div><AttendancePanel currentStatus={activeAttendance?.status ?? 'current'} counts={attendanceCounts} onChange={changeMyAttendanceStatus} /><div className="canvas-help"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동 <span>·</span> 왼쪽 마우스를 좌우·위아래로 드래그해 화면 이동 <span>·</span> 휠 위·아래로 전체 공간 확대·축소 <span>·</span> 바닥 클릭·끌기로 아바타 이동 <span>·</span> 좌석 클릭</div><div className="reference-controls" aria-label="아바타 이동 조작"><button aria-label="앞으로 이동" onClick={() => moveAvatar(0, -1.15)}>↑</button><div><button aria-label="왼쪽 이동" onClick={() => moveAvatar(-1.15, 0)}>←</button><button className="sit-control" aria-label="앉기" onClick={handleSit}>앉기</button><button aria-label="오른쪽 이동" onClick={() => moveAvatar(1.15, 0)}>→</button></div><button aria-label="뒤로 이동" onClick={() => moveAvatar(0, 1.15)}>↓</button></div><div className="reference-caption">{selectedCharacter.emoji} {displayName} · 머리 위 이름표 · 마우스 이동 가능</div></div> : <TwoDView rooms={rooms} selectedRoomId={selectedRoomId} onRoomSelect={goToRoom} onOpenResources={() => setPanel('resources')} onOpenGuidance={() => setPanel('guidance')} />}</main>
       <aside className="sidebar right-sidebar"><div className="right-heading"><div><span className="eyebrow">ROOM INFORMATION</span><h3>{selectedRoom.labelKo}</h3></div><span className="room-number">{String(rooms.findIndex((room) => room.roomId === selectedRoom.roomId) + 1).padStart(2, '0')} / {rooms.length}</span></div><div className="room-meta"><StatusPill tone={selectedRoom.access === 'public-demo' ? 'good' : 'gold'}>{selectedRoom.kind === 'private-washroom' ? '개인 전용 시연' : selectedRoom.access === 'public-demo' ? '공개 데모 구역' : selectedRoom.access === 'owner-invite' ? '초대 기반 시연' : '참여자 구역'}</StatusPill>{selectedRoom.seatCount > 0 && <span className="seat-meta">⌑ {selectedRoom.seatCount}석</span>}</div><p className="room-description">{selectedRoom.description}</p>{selectedRoom.owner && <div className="owner-line"><span>담당자</span><strong>{selectedRoom.owner}</strong></div>}<div className="feature-list">{selectedRoom.features.map((feature) => <span key={feature}>✓ {feature}</span>)}</div><div className="action-stack"><button className="primary-button" onClick={() => goToRoom(selectedRoom.roomId)}>이 구역으로 이동 <span>→</span></button>{selectedRoom.seatCount > 0 && <button className="secondary-button" onClick={() => setPanel('seat')}>좌석 선택 / 일어서기</button>}{['library', 'professor', 'amphitheater', 'global', 'defense', 'lab', 'research'].includes(selectedRoom.kind) && <button className="secondary-button" onClick={() => setPanel('resources')}>자료 열람</button>}{selectedRoom.kind === 'professor' && <button className="secondary-button dark" onClick={() => setPanel('guidance')}>논문지도 열기</button>}{selectedRoom.kind === 'global' && <button className="secondary-button dark" onClick={() => setPanel('connection')}>국제 수업 연결 상태</button>}{selectedRoom.kind === 'cafe' && <button className="secondary-button dark" onClick={() => setCoffeeMessage('따뜻한 커피 한 잔을 준비했습니다. 주문·결제는 연결되지 않은 시연입니다.')}>커피 머신 사용</button>}</div>{coffeeMessage && <div className="toast-note">{coffeeMessage}</div>}<div className="current-state"><div className="state-heading"><span>시연 상태</span><span className="eyebrow">LOCAL DEMO</span></div><div className="state-row"><span>현재 위치</span><strong>{selectedRoom.labelKo}</strong></div><div className="state-row"><span>내 좌석</span><strong>{occupiedSeat ?? '선택하지 않음'}</strong></div><div className="state-row"><span>지도 기록</span><strong>{notes.length}건 저장됨</strong></div></div><div className="connection-notice"><strong>연결이 필요한 기능</strong><span>다중 접속 · 실제 권한 · 음성 · 영상 · 화면 공유</span><small>현재는 외부 서비스 없이 단일 기기 시연으로 표시합니다.</small></div></aside>
     </div>
     {panel === 'access' && accessRoom && <RoomAccessDialog room={accessRoom} accessState={roomAccessState(accessRoom, currentRoomAccessRequest)} request={currentRoomAccessRequest} notice={roomAccessNotice} chatInput={roomChatInput} setChatInput={setRoomChatInput} onRequest={submitRoomAccessRequest} onRespond={submitRoomAccessResponse} onEnter={() => moveIntoRoom(accessRoom)} onClose={() => { setPanel(null); setAccessRoomId(null) }} />}
@@ -1229,9 +1257,9 @@ function AttendancePanel({ currentStatus, counts, onChange }: { currentStatus: A
   return <section className="attendance-panel" aria-label="캠퍼스 출결 상태"><div className="attendance-panel-heading"><div><span className="attendance-kicker">ATTENDANCE</span><strong>캠퍼스 출결 현황</strong></div><span className="attendance-my-status">내 상태 · {statusLabel}</span></div><div className="attendance-blocks"><button type="button" className={`attendance-block current ${currentStatus === 'current' ? 'selected' : ''}`} onClick={() => onChange('current')}><strong>{counts.current}</strong><span>현재 등교인원</span></button><button type="button" className={`attendance-block early ${currentStatus === 'early-leave' ? 'selected' : ''}`} onClick={() => onChange('early-leave')}><strong>{counts.earlyLeave}</strong><span>조퇴인원</span></button><button type="button" className={`attendance-block left ${currentStatus === 'left' ? 'selected' : ''}`} onClick={() => onChange('left')}><strong>{counts.left}</strong><span>하교인원</span></button></div><p className="attendance-panel-hint">현재 등교 상태로 3D 공간을 이용하며, 조퇴·하교 블록을 누르면 이용을 종료합니다.</p></section>
 }
 
-function AnnouncementBoard({ announcements, canManage, onOpen, onNew }: { announcements: Announcement[]; canManage: boolean; onOpen: (announcement: Announcement) => void; onNew: () => void }) {
+function AnnouncementBoard({ announcements, canManage, feedback, onOpen, onNew }: { announcements: Announcement[]; canManage: boolean; feedback: string; onOpen: (announcement: Announcement) => void; onNew: () => void }) {
   const [collapsed, setCollapsed] = useState(false)
-  return <aside className={`notice-board ${collapsed ? 'collapsed' : ''}`} aria-label="알림터 통합게시판"><div className="notice-board-header"><div><span className="notice-board-kicker">CAMPUS NOTICE</span><strong>알림터 통합게시판</strong></div><div className="notice-board-actions"><span className="notice-board-count">{announcements.length}건</span>{canManage && <button type="button" className="notice-new-button" onClick={onNew}>+ 새 공지</button>}<button type="button" className="panel-toggle" aria-expanded={!collapsed} onClick={() => setCollapsed((value) => !value)}>{collapsed ? '펼치기' : '접기'}</button></div></div>{!collapsed && <><div className="notice-list">{announcements.length === 0 ? <div className="notice-empty">등록된 공지글이 없습니다.</div> : announcements.map((announcement) => <button type="button" className="notice-item" key={announcement.id} onClick={() => onOpen(announcement)}><span className="notice-item-pin">{announcement.pinned ? '📌' : '•'}</span><span className="notice-item-body"><strong>{announcement.title}</strong><small>{announcement.category} · {announcement.author}</small></span><time dateTime={announcement.createdAt}>{announcement.createdAt.slice(5)}</time></button>)}</div><p className="notice-board-hint">제목을 클릭하면 공지 내용을 확인할 수 있습니다.</p></>}</aside>
+  return <aside className={`notice-board ${collapsed ? 'collapsed' : ''}`} aria-label="알림터 통합게시판"><div className="notice-board-header"><div><span className="notice-board-kicker">CAMPUS NOTICE</span><strong>알림터 통합게시판</strong></div><div className="notice-board-actions"><span className="notice-board-count">{announcements.length}건</span>{canManage && <button type="button" className="notice-new-button" onClick={onNew}>+ 새 공지</button>}<button type="button" className="panel-toggle" aria-expanded={!collapsed} onClick={() => setCollapsed((value) => !value)}>{collapsed ? '펼치기' : '접기'}</button></div></div>{!collapsed && <>{feedback && <p className="notice-board-feedback" role="status" aria-live="polite">{feedback}</p>}<div className="notice-list">{announcements.length === 0 ? <div className="notice-empty">등록된 공지글이 없습니다.</div> : announcements.map((announcement) => <button type="button" className="notice-item" key={announcement.id} onClick={() => onOpen(announcement)}><span className="notice-item-pin">{announcement.pinned ? '📌' : '•'}</span><span className="notice-item-body"><strong>{announcement.title}</strong><small>{announcement.category} · {announcement.author}</small></span><time dateTime={announcement.createdAt}>{announcement.createdAt.slice(5)}</time></button>)}</div><p className="notice-board-hint">제목을 클릭하면 공지 내용을 확인할 수 있습니다.</p></>}</aside>
 }
 
 function AnnouncementDetail({ announcement, canManage, onClose, onEdit, onDelete }: { announcement: Announcement; canManage: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
