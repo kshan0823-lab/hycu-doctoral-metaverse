@@ -68,6 +68,8 @@ select option { background: #111d26; }
 .left-sidebar { border-right: 1px solid var(--line); padding: 22px 16px 18px; display: flex; flex-direction: column; min-height: 0; }
 .school-return-button { display: flex; align-items: center; justify-content: center; gap: 8px; margin: -6px 0 14px; padding: 10px 12px; border: 1px solid rgba(197,161,107,.42); border-radius: 8px; background: linear-gradient(110deg, rgba(179,140,88,.2), rgba(210,179,127,.08)); color: #e5c58f; font-size: 11px; font-weight: 700; text-decoration: none; box-shadow: 0 8px 18px rgba(0,0,0,.12); }
 .school-return-button:hover { border-color: rgba(216,192,154,.72); background: linear-gradient(110deg, rgba(179,140,88,.32), rgba(210,179,127,.16)); color: #fff6e7; transform: translateY(-1px); }
+.campus-exit-button { display: flex; align-items: center; justify-content: center; margin: -6px 0 14px; padding: 9px 12px; border: 1px solid rgba(126,161,176,.38); border-radius: 8px; background: rgba(86,125,143,.12); color: #b4cbd1; font-size: 10px; font-weight: 700; text-decoration: none; }
+.campus-exit-button:hover { border-color: rgba(150,192,204,.72); background: rgba(86,125,143,.24); color: #eefbff; transform: translateY(-1px); }
 .right-sidebar { border-left: 1px solid var(--line); padding: 26px 22px; overflow-y: auto; }
 .user-card { display: flex; align-items: center; gap: 10px; margin-bottom: 26px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #15232d; position: relative; }
 .avatar-badge { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: linear-gradient(145deg, #fff0c7, #f2d6dc); color: #142027; font-weight: 900; font-size: 22px; }
