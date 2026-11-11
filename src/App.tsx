@@ -24,7 +24,7 @@ type Resource = { title: string; type: string; year: string; keywords: string; a
 type CharacterOption = { id: string; gender: 'male' | 'female'; label: string; emoji: string; color: string }
 type RoleOption = { id: Role; label: string; name: string; characterId: string }
 type EntryMode = 'member' | 'visitor'
-type AccessRequest = { id: number; kind: EntryMode; roleId?: Role; roleLabel: string; name: string; studentNumber?: string; phone?: string; visitPurpose?: string; status: 'pending' | 'approved' | 'rejected' | 'hold' | 'needs-purpose'; createdAt: string }
+type AccessRequest = { id: number; kind: EntryMode; roleId?: Role; roleLabel: string; name: string; studentNumber?: string; phone?: string; visitPurpose?: string; status: 'pending' | 'approved' | 'rejected' | 'hold' | 'needs-purpose'; createdAt: string; entryLimit?: number; entriesUsed?: number }
 type AttendanceStatus = 'current' | 'early-leave' | 'left'
 type AttendanceRecord = { id: number; requestId: number; name: string; roleLabel: string; entryMode: EntryMode; status: AttendanceStatus; enteredAt: string; changedAt: string }
 type RoomAccessState = 'allowed' | 'approval' | 'pending' | 'restricted'
@@ -68,6 +68,21 @@ const palette: Record<string, string> = {
 }
 const accent = '#c5a16b'
 const seminarLandingUrl = 'https://kshan0823-lab.github.io/hycu-doctoral-seminar-2026-11-12/'
+
+function accessEntryLimit(request: AccessRequest) {
+  const raw = Number(request.entryLimit ?? 1)
+  return Number.isFinite(raw) ? Math.min(999, Math.max(1, Math.floor(raw))) : 1
+}
+
+function accessEntriesUsed(request: AccessRequest) {
+  const raw = Number(request.entriesUsed ?? 0)
+  return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0
+}
+
+function accessEntriesRemaining(request: AccessRequest) {
+  return Math.max(0, accessEntryLimit(request) - accessEntriesUsed(request))
+}
+
 const initialNotes: GuidanceNote[] = [
   { id: 1, author: '김승환 지도교수(가상)', version: 'v0.3 연구계획서', section: '연구질문', note: '도시재생 대상지 선정 이유를 한 문단으로 정리해 보세요.', status: '수정 요청', date: '2026-11-11' },
   { id: 2, author: '문국찬 연구생', version: 'v0.2 연구계획서', section: '2장', note: '공개 요약에 반영할 핵심 키워드를 추가했습니다.', status: '확인 완료', date: '2026-11-10' },
@@ -861,7 +876,10 @@ function App() {
   useEffect(() => {
     const saved = window.localStorage.getItem('hycu-demo-access-requests')
     if (saved) {
-      try { setAccessRequests(JSON.parse(saved) as AccessRequest[]) } catch { /* demo data only */ }
+      try {
+        const parsed = JSON.parse(saved) as AccessRequest[]
+        setAccessRequests(parsed.map((request) => ({ ...request, entryLimit: accessEntryLimit(request), entriesUsed: accessEntriesUsed(request) })))
+      } catch { /* demo data only */ }
     }
   }, [])
 
@@ -1024,8 +1042,14 @@ function App() {
   }
 
   const enterApprovedCampus = (request: AccessRequest) => {
-    updateAttendanceStatus('current', request)
-    setDisplayName(request.name)
+    if (accessEntriesRemaining(request) <= 0) {
+      setRequestStatus('허용된 입장 횟수를 모두 사용했습니다. 관리자에게 다시 신청해 주세요.')
+      return
+    }
+    const consumedRequest = { ...request, entryLimit: accessEntryLimit(request), entriesUsed: accessEntriesUsed(request) + 1 }
+    saveAccessRequests(accessRequests.map((item) => item.id === request.id ? consumedRequest : item))
+    updateAttendanceStatus('current', consumedRequest)
+    setDisplayName(consumedRequest.name)
     setRequestStatus('')
     setEntered(true)
   }
@@ -1042,6 +1066,10 @@ function App() {
 
   const submitAccessRequest = () => {
     if (matchingRequest?.status === 'approved') {
+      if (accessEntriesRemaining(matchingRequest) <= 0) {
+        setRequestStatus('허용된 입장 횟수를 모두 사용했습니다. 관리자에게 다시 신청해 주세요.')
+        return
+      }
       enterApprovedCampus(matchingRequest)
       return
     }
@@ -1086,13 +1114,24 @@ function App() {
       visitPurpose: entryMode === 'visitor' ? visitorPurpose.trim() : undefined,
       status: 'pending',
       createdAt: new Date().toLocaleString('ko-KR', { hour12: false }),
+      entryLimit: 1,
+      entriesUsed: 0,
     }
     saveAccessRequests([request, ...accessRequests])
     setRequestStatus('입장 신청이 접수되었습니다. 관리자가 확인하면 입장할 수 있습니다.')
   }
 
-  const updateAccessRequest = (id: number, status: AccessRequest['status']) => {
-    saveAccessRequests(accessRequests.map((request) => request.id === id ? { ...request, status } : request))
+  const updateAccessRequest = (id: number, status: AccessRequest['status'], entryLimit?: number) => {
+    saveAccessRequests(accessRequests.map((request) => {
+      if (request.id !== id) return request
+      const rawLimit = Number(entryLimit ?? accessEntryLimit(request))
+      const nextLimit = Number.isFinite(rawLimit) ? Math.min(999, Math.max(1, Math.floor(rawLimit))) : accessEntryLimit(request)
+      return { ...request, status, entryLimit: nextLimit, entriesUsed: accessEntriesUsed(request) }
+    }))
+  }
+
+  const updateAccessEntryLimit = (id: number, entryLimit: number) => {
+    updateAccessRequest(id, accessRequests.find((request) => request.id === id)?.status ?? 'pending', entryLimit)
   }
 
   const deleteAccessRequest = (id: number) => {
@@ -1212,8 +1251,8 @@ function App() {
   }
 
   if (adminView && !adminAuthenticated) return <AdminPasswordScreen password={adminPassword} setPassword={setAdminPassword} error={adminPasswordError} onSubmit={verifyAdminPassword} onBack={closeAdminView} />
-  if (adminView) return <AdminPanel requests={accessRequests} attendanceRecords={attendanceRecords} onApprove={(id) => updateAccessRequest(id, 'approved')} onReject={(id) => updateAccessRequest(id, 'rejected')} onHold={(id) => updateAccessRequest(id, 'hold')} onRequestPurpose={(id) => updateAccessRequest(id, 'needs-purpose')} onDelete={deleteAccessRequest} onBack={closeAdminView} />
-  if (!entered) return <EntryScreen entryMode={entryMode} setEntryMode={(mode) => { setEntryMode(mode); setRequestStatus('') }} displayName={displayName} visitorName={visitorName} setVisitorName={setVisitorName} studentNumber={studentNumber} setStudentNumber={setStudentNumber} phoneNumber={phoneNumber} setPhoneNumber={setPhoneNumber} visitorPurpose={visitorPurpose} setVisitorPurpose={setVisitorPurpose} role={role} setRole={(nextRole) => { setRole(nextRole); setRequestStatus('') }} roleOptions={roleOptions} selectedCharacter={selectedCharacter} characterId={characterId} setCharacterId={setCharacterId} requestStatus={requestStatus} requestState={matchingRequest?.status ?? null} onSubmit={submitAccessRequest} onAdmin={openAdminGate} />
+  if (adminView) return <AdminPanel requests={accessRequests} attendanceRecords={attendanceRecords} onApprove={(id, entryLimit) => updateAccessRequest(id, 'approved', entryLimit)} onSetEntryLimit={updateAccessEntryLimit} onReject={(id) => updateAccessRequest(id, 'rejected')} onHold={(id) => updateAccessRequest(id, 'hold')} onRequestPurpose={(id) => updateAccessRequest(id, 'needs-purpose')} onDelete={deleteAccessRequest} onBack={closeAdminView} />
+  if (!entered) return <EntryScreen entryMode={entryMode} setEntryMode={(mode) => { setEntryMode(mode); setRequestStatus('') }} displayName={displayName} visitorName={visitorName} setVisitorName={setVisitorName} studentNumber={studentNumber} setStudentNumber={setStudentNumber} phoneNumber={phoneNumber} setPhoneNumber={setPhoneNumber} visitorPurpose={visitorPurpose} setVisitorPurpose={setVisitorPurpose} role={role} setRole={(nextRole) => { setRole(nextRole); setRequestStatus('') }} roleOptions={roleOptions} selectedCharacter={selectedCharacter} characterId={characterId} setCharacterId={setCharacterId} requestStatus={requestStatus} requestState={matchingRequest?.status ?? null} requestEntriesRemaining={matchingRequest ? accessEntriesRemaining(matchingRequest) : null} onSubmit={submitAccessRequest} onAdmin={openAdminGate} />
 
   return <div className="app-shell reference-style">
     <header className="topbar"><div className="topbar-brand"><div className="brand-mark small">HYCU <span>DRC</span></div><div><strong>박사논문 연구캠퍼스</strong><small>가상 연구캠퍼스 시연</small></div></div><div className="topbar-status"><StatusPill tone="good">● 데모 정상 작동</StatusPill><StatusPill tone="warn">외부 연결 없음</StatusPill><button className="quiet-button" onClick={() => setViewMode(viewMode === '3d' ? '2d' : '3d')}>{viewMode === '3d' ? '2D 접근 화면' : '3D 공간으로 돌아가기'}</button></div></header>
@@ -1249,14 +1288,15 @@ type EntryScreenProps = {
   setCharacterId: (id: string) => void
   requestStatus: string
   requestState: AccessRequest['status'] | null
+  requestEntriesRemaining: number | null
   onSubmit: () => void
   onAdmin: () => void
 }
 
-function EntryScreen({ entryMode, setEntryMode, displayName, visitorName, setVisitorName, studentNumber, setStudentNumber, phoneNumber, setPhoneNumber, visitorPurpose, setVisitorPurpose, role, setRole, roleOptions, selectedCharacter, characterId, setCharacterId, requestStatus, requestState, onSubmit, onAdmin }: EntryScreenProps) {
-  const buttonLabel = requestState === 'approved' ? '관리자 승인 완료 · 캠퍼스 입장' : requestState === 'pending' ? '관리자 확인 중' : requestState === 'hold' ? '관리자 보류 중' : requestState === 'needs-purpose' ? '방문목적 다시 기록하기' : '입장 신청하기'
-  const stateMessage = requestState === 'needs-purpose' ? '관리자가 방문목적을 다시 기록해 달라고 요청했습니다.' : requestState === 'hold' ? '관리자가 신청을 보류했습니다. 확인이 끝날 때까지 기다려 주세요.' : ''
-  return <div className="entry-screen"><div className="entry-card"><div className="entry-card-top"><div className="brand-mark">HYCU <span>DRC</span></div><button className="admin-link" type="button" onClick={onAdmin}>관리자 페이지</button></div><p className="eyebrow">DOCTORAL RESEARCH CAMPUS</p><h1><span className="title-line">HYCU 부동산대학원</span><span className="title-line"><em>박사논문 연구캠퍼스</em></span></h1><p className="entry-copy">29개 공간을 실제 3D 단층 캠퍼스로 둘러보고, 입장 신청 후 관리자 확인을 거쳐 캠퍼스를 이용합니다.</p><div className="demo-note"><span>시연 전용</span> 신청 정보는 이 브라우저 안에만 저장되며 실제 문자·학교 계정과 연결되지 않습니다.</div><div className="access-mode-tabs"><button type="button" className={entryMode === 'member' ? 'active' : ''} onClick={() => setEntryMode('member')}>교수·연구생</button><button type="button" className={entryMode === 'visitor' ? 'active' : ''} onClick={() => setEntryMode('visitor')}>방문자 신청</button></div>{entryMode === 'member' ? <><label>선택된 입장자 이름<input value={displayName} readOnly /></label><label>입장할 사람 6명 중 선택<select value={role} onChange={(event) => setRole(event.target.value as Role)}>{roleOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><label>학번·교직원번호<input value={studentNumber} onChange={(event) => setStudentNumber(event.target.value)} placeholder="학번 또는 교직원번호 입력" /></label></> : <><label>방문자 이름<input value={visitorName} onChange={(event) => setVisitorName(event.target.value)} placeholder="방문자 이름 입력" /></label><label>휴대폰 번호<input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="010-0000-0000" inputMode="tel" /></label><label>방문목적<textarea value={visitorPurpose} onChange={(event) => setVisitorPurpose(event.target.value)} placeholder="방문 목적을 입력해 주세요." rows={3} /></label></>}<div className="character-picker"><div className="character-picker-heading"><span>움직일 사람 이모지 선택</span><small>{selectedCharacter.emoji} {selectedCharacter.label}</small></div><div className="character-grid">{characterOptions.map((character) => <button type="button" key={character.id} className={`character-option ${character.id === characterId ? 'selected' : ''}`} onClick={() => setCharacterId(character.id)} aria-label={`${character.label} 선택`}><span className="character-emoji">{character.emoji}</span><small>{character.label}</small></button>)}</div></div>{(requestStatus || stateMessage) && <div className={`access-status ${requestState ?? 'info'}`}>{requestStatus || stateMessage}</div>}<button className="primary-button entry-button" onClick={onSubmit} disabled={requestState === 'pending' || requestState === 'hold'}>{buttonLabel} <span>→</span></button><div className="entry-footer"><span>관리자 승인 후 입장</span><span>{entryMode === 'member' ? '교수·연구생 6명' : '방문자 신청'}</span><span>외부 연결 없음</span></div></div><div className="entry-glow glow-one" /><div className="entry-glow glow-two" /></div>
+function EntryScreen({ entryMode, setEntryMode, displayName, visitorName, setVisitorName, studentNumber, setStudentNumber, phoneNumber, setPhoneNumber, visitorPurpose, setVisitorPurpose, role, setRole, roleOptions, selectedCharacter, characterId, setCharacterId, requestStatus, requestState, requestEntriesRemaining, onSubmit, onAdmin }: EntryScreenProps) {
+  const buttonLabel = requestState === 'approved' && requestEntriesRemaining === 0 ? '허용 횟수 소진' : requestState === 'approved' ? `캠퍼스 입장하기 · ${requestEntriesRemaining}회 남음` : requestState === 'pending' ? '관리자 확인 중' : requestState === 'hold' ? '관리자 보류 중' : requestState === 'needs-purpose' ? '방문목적 다시 기록하기' : '입장 신청하기'
+  const stateMessage = requestState === 'approved' && requestEntriesRemaining === 0 ? '허용된 입장 횟수를 모두 사용했습니다. 관리자에게 다시 신청해 주세요.' : requestState === 'approved' ? `관리자가 입장을 승인했습니다. 남은 입장 횟수는 ${requestEntriesRemaining}회입니다.` : requestState === 'needs-purpose' ? '관리자가 방문목적을 다시 기록해 달라고 요청했습니다.' : requestState === 'hold' ? '관리자가 신청을 보류했습니다. 확인이 끝날 때까지 기다려 주세요.' : ''
+  return <div className="entry-screen"><div className="entry-card"><div className="entry-card-top"><div className="brand-mark">HYCU <span>DRC</span></div><button className="admin-link" type="button" onClick={onAdmin}>관리자 페이지</button></div><p className="eyebrow">DOCTORAL RESEARCH CAMPUS</p><h1><span className="title-line">HYCU 부동산대학원</span><span className="title-line"><em>박사논문 연구캠퍼스</em></span></h1><p className="entry-copy">29개 공간을 실제 3D 단층 캠퍼스로 둘러보고, 입장 신청 후 관리자 확인을 거쳐 캠퍼스를 이용합니다.</p><div className="demo-note"><span>시연 전용</span> 신청 정보는 이 브라우저 안에만 저장되며 실제 문자·학교 계정과 연결되지 않습니다.</div><div className="access-mode-tabs"><button type="button" className={entryMode === 'member' ? 'active' : ''} onClick={() => setEntryMode('member')}>교수·연구생</button><button type="button" className={entryMode === 'visitor' ? 'active' : ''} onClick={() => setEntryMode('visitor')}>방문자 신청</button></div>{entryMode === 'member' ? <><label>선택된 입장자 이름<input value={displayName} readOnly /></label><label>입장할 사람 6명 중 선택<select value={role} onChange={(event) => setRole(event.target.value as Role)}>{roleOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><label>학번·교직원번호<input value={studentNumber} onChange={(event) => setStudentNumber(event.target.value)} placeholder="학번 또는 교직원번호 입력" /></label></> : <><label>방문자 이름<input value={visitorName} onChange={(event) => setVisitorName(event.target.value)} placeholder="방문자 이름 입력" /></label><label>휴대폰 번호<input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="010-0000-0000" inputMode="tel" /></label><label>방문목적<textarea value={visitorPurpose} onChange={(event) => setVisitorPurpose(event.target.value)} placeholder="방문 목적을 입력해 주세요." rows={3} /></label></>}<div className="character-picker"><div className="character-picker-heading"><span>움직일 사람 이모지 선택</span><small>{selectedCharacter.emoji} {selectedCharacter.label}</small></div><div className="character-grid">{characterOptions.map((character) => <button type="button" key={character.id} className={`character-option ${character.id === characterId ? 'selected' : ''}`} onClick={() => setCharacterId(character.id)} aria-label={`${character.label} 선택`}><span className="character-emoji">{character.emoji}</span><small>{character.label}</small></button>)}</div></div>{(requestStatus || stateMessage) && <div className={`access-status ${requestState ?? 'info'}`}>{requestStatus || stateMessage}</div>}<button className="primary-button entry-button" onClick={onSubmit} disabled={requestState === 'pending' || requestState === 'hold' || requestEntriesRemaining === 0}>{buttonLabel} <span>→</span></button><div className="entry-footer"><span>승인 후 남은 횟수만큼 재입장 가능</span><span>{entryMode === 'member' ? '교수·연구생 6명' : '방문자 신청'}</span><span>외부 연결 없음</span></div></div><div className="entry-glow glow-one" /><div className="entry-glow glow-two" /></div>
 }
 
 function AdminPasswordScreen({ password, setPassword, error, onSubmit, onBack }: { password: string; setPassword: (value: string) => void; error: string; onSubmit: () => void; onBack: () => void }) {
@@ -1325,16 +1365,30 @@ function RoomAccessDialog({ room, accessState, request, notice, chatInput, setCh
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="dialog-card access-dialog"><div className="dialog-header"><div><span className="eyebrow">PRIVATE ACCESS CHAT</span><h3>{room.labelKo}</h3></div><button className="close-button" onClick={onClose}>×</button></div><div className="access-panel"><div className="access-room-meta"><span>담당자</span><strong>{room.owner ?? '담당자'}</strong><b className={`access-state-badge ${accessState}`}>{statusLabel}</b></div><div className="dialog-note">독립된 공간은 담당자의 허락 없이는 입장할 수 없습니다. 교수실과 연구실은 대화창에 <strong>신청</strong>을 남긴 뒤 담당자가 <strong>승인</strong>해야 입장할 수 있습니다.</div><div className="access-chat" aria-label="공간 입장 대화창"><div className="chat-bubble requester"><small>{request?.requesterName ?? '현재 입장자'}</small><strong>{request?.requestText ?? '아직 입장 신청 전'}</strong></div>{request?.responseText && <div className="chat-bubble owner"><small>{request.ownerName}</small><strong>{request.responseText}</strong></div>}</div>{notice && <div className="room-access-notice">{notice}</div>}{accessState === 'restricted' && <div className="access-denied-note">이 공간은 해당 담당자만 사용하는 독립 공간입니다. 타인의 화장실·샤워실·개인 휴게실에는 입장할 수 없습니다.</div>}{accessState === 'approval' && <button className="primary-button access-action" onClick={onRequest}>대화창에 “신청” 보내기 <span>→</span></button>}{accessState === 'pending' && <><label className="chat-response-field">담당자 답변 입력<input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="승인" /></label><button className="primary-button access-action" onClick={onRespond}>담당자 답변 보내기 <span>→</span></button></>}{accessState === 'allowed' && <button className="primary-button access-action" onClick={onEnter}>승인된 공간으로 입장 <span>→</span></button>}</div></section></div>
 }
 
-function AdminPanel({ requests, attendanceRecords, onApprove, onReject, onHold, onRequestPurpose, onDelete, onBack }: { requests: AccessRequest[]; attendanceRecords: AttendanceRecord[]; onApprove: (id: number) => void; onReject: (id: number) => void; onHold: (id: number) => void; onRequestPurpose: (id: number) => void; onDelete: (id: number) => void; onBack: () => void }) {
+function AdminPanel({ requests, attendanceRecords, onApprove, onSetEntryLimit, onReject, onHold, onRequestPurpose, onDelete, onBack }: { requests: AccessRequest[]; attendanceRecords: AttendanceRecord[]; onApprove: (id: number, entryLimit: number) => void; onSetEntryLimit: (id: number, entryLimit: number) => void; onReject: (id: number) => void; onHold: (id: number) => void; onRequestPurpose: (id: number) => void; onDelete: (id: number) => void; onBack: () => void }) {
   const waitingStatuses: AccessRequest['status'][] = ['pending', 'hold', 'needs-purpose']
   const pendingCount = requests.filter((request) => waitingStatuses.includes(request.status)).length
+  const [entryLimits, setEntryLimits] = useState<Record<number, string>>(() => Object.fromEntries(requests.map((request) => [request.id, String(accessEntryLimit(request))])))
+  useEffect(() => {
+    setEntryLimits((current) => {
+      const next = { ...current }
+      requests.forEach((request) => {
+        if (next[request.id] === undefined) next[request.id] = String(accessEntryLimit(request))
+      })
+      return next
+    })
+  }, [requests])
+  const entryLimitFor = (request: AccessRequest) => {
+    const raw = Number(entryLimits[request.id] ?? accessEntryLimit(request))
+    return Number.isFinite(raw) && raw >= 1 ? Math.min(999, Math.floor(raw)) : 1
+  }
   const attendanceCounts = {
     current: attendanceRecords.filter((record) => record.status === 'current').length,
     earlyLeave: attendanceRecords.filter((record) => record.status === 'early-leave').length,
     left: attendanceRecords.filter((record) => record.status === 'left').length,
   }
-  const statusLabel = (status: AccessRequest['status']) => status === 'pending' ? '확인 대기' : status === 'approved' ? '승인 완료' : status === 'rejected' ? '거절됨' : status === 'hold' ? '보류' : '방문목적 재기록 요청'
-  return <div className="admin-screen"><section className="admin-card"><div className="admin-header"><div><div className="brand-mark">HYCU <span>DRC</span></div><p className="eyebrow">CAMPUS ACCESS ADMIN</p><h1>입장 신청 관리자 확인</h1></div><button className="admin-back" type="button" onClick={onBack}>입장 화면으로</button></div><p className="admin-copy">교수·연구생과 방문자의 신청을 확인하고 각 신청 블록에서 승인, 거절, 방문목적 재기록 요청, 보류, 삭제를 처리합니다.</p><div className="admin-summary"><div><span>전체 신청</span><strong>{requests.length}</strong></div><div><span>확인 대기</span><strong>{pendingCount}</strong></div><div><span>승인 완료</span><strong>{requests.filter((request) => request.status === 'approved').length}</strong></div></div><div className="attendance-admin-blocks" aria-label="출결 인원 집계"><div className="attendance-admin-block current"><span>현재 등교인원</span><strong>{attendanceCounts.current}</strong><small>현재 3D 공간 이용 중</small></div><div className="attendance-admin-block early"><span>조퇴인원</span><strong>{attendanceCounts.earlyLeave}</strong><small>조퇴 처리된 인원</small></div><div className="attendance-admin-block left"><span>하교인원</span><strong>{attendanceCounts.left}</strong><small>오늘 이용을 종료한 인원</small></div></div>{attendanceRecords.length > 0 && <div className="attendance-admin-list"><div className="attendance-admin-list-heading"><strong>출결 상태 명단</strong><span>3D 공간에서 본인이 상태를 변경합니다.</span></div>{attendanceRecords.map((record) => <div className="attendance-admin-row" key={record.id}><span><strong>{record.name}</strong><small>{record.roleLabel}</small></span><b className={`attendance-badge ${record.status}`}>{record.status === 'current' ? '현재 등교' : record.status === 'early-leave' ? '조퇴' : '하교'}</b><time>{record.changedAt}</time></div>)}</div>}{requests.length === 0 ? <div className="admin-empty">아직 입장 신청이 없습니다. 입장 화면에서 신청을 먼저 접수해 주세요.</div> : <div className="admin-request-list">{requests.map((request) => <article className="admin-request" key={request.id}><div className="admin-request-main"><div className="admin-request-title"><strong>{request.name}</strong><span className={`request-badge ${request.status}`}>{statusLabel(request.status)}</span></div><p>{request.roleLabel}</p><small>{request.kind === 'member' ? `학번·교직원번호: ${request.studentNumber}` : `휴대폰: ${request.phone}`} · 신청일시: {request.createdAt}</small>{request.kind === 'visitor' && <div className="visit-purpose-line"><span>방문목적</span><strong>{request.visitPurpose || '아직 기록되지 않음'}</strong></div>}</div><div className="admin-request-actions"><button type="button" className="approve-button" onClick={() => onApprove(request.id)}>승인</button><button type="button" className="reject-button" onClick={() => onReject(request.id)}>거절</button>{request.kind === 'visitor' && <button type="button" className="purpose-button" onClick={() => onRequestPurpose(request.id)}>방문목적 다시 요청</button>}<button type="button" className="hold-button" onClick={() => onHold(request.id)}>보류</button><button type="button" className="delete-button" onClick={() => onDelete(request.id)}>신청 내역 삭제</button></div></article>)}</div>}<div className="admin-note">현재는 외부 서버 없이 이 브라우저의 시연 기록으로만 관리됩니다. 삭제한 신청 내역은 이 브라우저에서 제거되며, 실제 운영에서는 로그인·권한·서버 저장·문자 알림 연결이 필요합니다.</div></section></div>
+  const statusLabel = (request: AccessRequest) => request.status === 'approved' && accessEntriesRemaining(request) === 0 ? '입장 횟수 소진' : request.status === 'pending' ? '확인 대기' : request.status === 'approved' ? '승인 완료' : request.status === 'rejected' ? '거절됨' : request.status === 'hold' ? '보류' : '방문목적 재기록 요청'
+  return <div className="admin-screen"><section className="admin-card"><div className="admin-header"><div><div className="brand-mark">HYCU <span>DRC</span></div><p className="eyebrow">CAMPUS ACCESS ADMIN</p><h1>입장 신청 관리자 확인</h1></div><button className="admin-back" type="button" onClick={onBack}>입장 화면으로</button></div><p className="admin-copy">신청자별 허용 입장 횟수를 정한 뒤 승인해 주세요. 승인된 신청자는 남은 횟수만큼 추가 신청 없이 입장할 수 있습니다.</p><div className="admin-summary"><div><span>전체 신청</span><strong>{requests.length}</strong></div><div><span>확인 대기</span><strong>{pendingCount}</strong></div><div><span>승인 완료</span><strong>{requests.filter((request) => request.status === 'approved').length}</strong></div></div><div className="attendance-admin-blocks" aria-label="출결 인원 집계"><div className="attendance-admin-block current"><span>현재 등교인원</span><strong>{attendanceCounts.current}</strong><small>현재 3D 공간 이용 중</small></div><div className="attendance-admin-block early"><span>조퇴인원</span><strong>{attendanceCounts.earlyLeave}</strong><small>조퇴 처리된 인원</small></div><div className="attendance-admin-block left"><span>하교인원</span><strong>{attendanceCounts.left}</strong><small>오늘 이용을 종료한 인원</small></div></div>{attendanceRecords.length > 0 && <div className="attendance-admin-list"><div className="attendance-admin-list-heading"><strong>출결 상태 명단</strong><span>3D 공간에서 본인이 상태를 변경합니다.</span></div>{attendanceRecords.map((record) => <div className="attendance-admin-row" key={record.id}><span><strong>{record.name}</strong><small>{record.roleLabel}</small></span><b className={`attendance-badge ${record.status}`}>{record.status === 'current' ? '현재 등교' : record.status === 'early-leave' ? '조퇴' : '하교'}</b><time>{record.changedAt}</time></div>)}</div>}{requests.length === 0 ? <div className="admin-empty">아직 입장 신청이 없습니다. 입장 화면에서 신청을 먼저 접수해 주세요.</div> : <div className="admin-request-list">{requests.map((request) => { const currentLimit = entryLimitFor(request); const remaining = accessEntriesRemaining({ ...request, entryLimit: currentLimit }); const badgeClass = request.status === 'approved' && remaining === 0 ? 'exhausted' : request.status; return <article className="admin-request" key={request.id}><div className="admin-request-main"><div className="admin-request-title"><strong>{request.name}</strong><span className={`request-badge ${badgeClass}`}>{statusLabel({ ...request, entryLimit: currentLimit })}</span></div><p>{request.roleLabel}</p><small>{request.kind === 'member' ? `학번·교직원번호: ${request.studentNumber}` : `휴대폰: ${request.phone}`} · 신청일시: {request.createdAt}</small>{request.kind === 'visitor' && <div className="visit-purpose-line"><span>방문목적</span><strong>{request.visitPurpose || '아직 기록되지 않음'}</strong></div>}<div className="entry-limit-control"><label>허용 입장 횟수<input type="number" min="1" max="999" value={entryLimits[request.id] ?? String(accessEntryLimit(request))} onChange={(event) => setEntryLimits((current) => ({ ...current, [request.id]: event.target.value }))} /></label><span>{request.status === 'approved' ? `남은 횟수 ${remaining}회` : '승인할 때 적용됩니다.'}</span><button type="button" className="entry-limit-save" onClick={() => onSetEntryLimit(request.id, currentLimit)}>횟수 저장</button></div></div><div className="admin-request-actions"><button type="button" className="approve-button" onClick={() => onApprove(request.id, currentLimit)}>승인</button><button type="button" className="reject-button" onClick={() => onReject(request.id)}>거절</button>{request.kind === 'visitor' && <button type="button" className="purpose-button" onClick={() => onRequestPurpose(request.id)}>방문목적 다시 요청</button>}<button type="button" className="hold-button" onClick={() => onHold(request.id)}>보류</button><button type="button" className="delete-button" onClick={() => onDelete(request.id)}>신청 내역 삭제</button></div></article> })}</div>}<div className="admin-note">관리자가 신청자마다 허용 입장 횟수를 지정합니다. 입장할 때마다 1회씩 차감되며, 남은 횟수가 있는 동안에는 신청자가 다시 신청하지 않아도 바로 입장할 수 있습니다.</div></section></div>
 }
 
 function TwoDView({ rooms, selectedRoomId, onRoomSelect, onOpenResources, onOpenGuidance }: { rooms: RoomSpec[]; selectedRoomId: string; onRoomSelect: (id: string) => void; onOpenResources: () => void; onOpenGuidance: () => void }) {
