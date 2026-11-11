@@ -68,6 +68,7 @@ const palette: Record<string, string> = {
 }
 const accent = '#c5a16b'
 const seminarLandingUrl = 'https://kshan0823-lab.github.io/hycu-doctoral-seminar-2026-11-12/'
+const rememberedAccessRequestKey = 'hycu-demo-last-approved-request'
 
 function accessEntryLimit(request: AccessRequest) {
   const raw = Number(request.entryLimit ?? 1)
@@ -838,9 +839,10 @@ function App() {
   const sortedAnnouncements = useMemo(() => [...announcements].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt.localeCompare(a.createdAt)), [announcements])
   const applicantName = entryMode === 'visitor' ? visitorName.trim() : selectedRole.name
   const applicantRoleLabel = entryMode === 'visitor' ? '방문자' : selectedRole.label
-  const matchingRequest = accessRequests.find((request) => entryMode === 'visitor'
+  const matchingRequests = accessRequests.filter((request) => entryMode === 'visitor'
     ? request.kind === 'visitor' && request.name === applicantName && request.phone === phoneNumber.trim()
     : request.kind === 'member' && request.roleId === role && request.studentNumber === studentNumber.trim())
+  const matchingRequest = matchingRequests.find((request) => request.status === 'approved') ?? matchingRequests[0]
   const activeAttendance = matchingRequest ? attendanceRecords.find((record) => record.requestId === matchingRequest.id) : undefined
   const attendanceCounts = useMemo(() => ({
     current: attendanceRecords.filter((record) => record.status === 'current').length,
@@ -878,7 +880,24 @@ function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved) as AccessRequest[]
-        setAccessRequests(parsed.map((request) => ({ ...request, entryLimit: accessEntryLimit(request), entriesUsed: accessEntriesUsed(request) })))
+        const normalized = parsed.map((request) => ({ ...request, entryLimit: accessEntryLimit(request), entriesUsed: accessEntriesUsed(request) }))
+        setAccessRequests(normalized)
+        const rememberedId = Number(window.localStorage.getItem(rememberedAccessRequestKey))
+        const approvedRequests = normalized.filter((request) => request.status === 'approved')
+        const remembered = approvedRequests.find((request) => request.id === rememberedId) ?? (approvedRequests.length === 1 ? approvedRequests[0] : undefined)
+        if (remembered) {
+          setEntryMode(remembered.kind)
+          setDisplayName(remembered.name)
+          if (remembered.kind === 'member') {
+            setRole(remembered.roleId ?? 'professor')
+            setStudentNumber(remembered.studentNumber ?? '')
+            setCharacterId(roleOptions.find((option) => option.id === (remembered.roleId ?? 'professor'))?.characterId ?? 'male-teacher')
+          } else {
+            setVisitorName(remembered.name)
+            setPhoneNumber(remembered.phone ?? '')
+            setVisitorPurpose(remembered.visitPurpose ?? '')
+          }
+        }
       } catch { /* demo data only */ }
     }
   }, [])
@@ -1048,6 +1067,7 @@ function App() {
     }
     const consumedRequest = { ...request, entryLimit: accessEntryLimit(request), entriesUsed: accessEntriesUsed(request) + 1 }
     saveAccessRequests(accessRequests.map((item) => item.id === request.id ? consumedRequest : item))
+    window.localStorage.setItem(rememberedAccessRequestKey, String(request.id))
     updateAttendanceStatus('current', consumedRequest)
     setDisplayName(consumedRequest.name)
     setRequestStatus('')
@@ -1126,6 +1146,7 @@ function App() {
       if (request.id !== id) return request
       const rawLimit = Number(entryLimit ?? accessEntryLimit(request))
       const nextLimit = Number.isFinite(rawLimit) ? Math.min(999, Math.max(1, Math.floor(rawLimit))) : accessEntryLimit(request)
+      if (status === 'approved') window.localStorage.setItem(rememberedAccessRequestKey, String(request.id))
       return { ...request, status, entryLimit: nextLimit, entriesUsed: accessEntriesUsed(request) }
     }))
   }
