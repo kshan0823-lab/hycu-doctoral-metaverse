@@ -29,7 +29,7 @@ type AttendanceStatus = 'current' | 'early-leave' | 'left'
 type AttendanceRecord = { id: number; requestId: number; name: string; roleLabel: string; entryMode: EntryMode; status: AttendanceStatus; enteredAt: string; changedAt: string }
 type RoomAccessState = 'allowed' | 'approval' | 'pending' | 'restricted'
 type RoomAccessRequest = { id: number; roomId: string; requesterName: string; requesterRole: Role | null; requesterMode: EntryMode; ownerName: string; status: 'pending' | 'approved' | 'rejected'; requestText: string; responseText?: string; createdAt: string }
-type Announcement = { id: number; category: string; title: string; author: string; createdAt: string; updatedAt?: string; content: string; pinned: boolean }
+type Announcement = { id: number; category: string; title: string; author: string; createdAt: string; updatedAt?: string; content: string; pinned: boolean; linkUrl?: string }
 
 const rooms = roomsJson as RoomSpec[]
 const characterOptions: CharacterOption[] = [
@@ -75,6 +75,7 @@ const initialAnnouncements: Announcement[] = [
   { id: 1, category: '캠퍼스 안내', title: '2026년 11월 연구캠퍼스 이용 안내', author: '과목운영책임 교수', createdAt: '2026-11-11', content: '<h2>연구캠퍼스 이용 안내</h2><p>입장 승인 후 29개 연구공간을 확인할 수 있습니다. 교수실과 연구생 연구실은 담당자 승인 후 입장해 주세요.</p><ul><li>마우스 좌우·위아래 드래그: 화면 이동</li><li>마우스 휠: 전체 공간 확대·축소</li><li>공간 클릭: 구역 이동과 자료 확인</li></ul>', pinned: true },
   { id: 2, category: '논문지도', title: '박사논문 지도 일정 확인', author: '과목운영책임 교수', createdAt: '2026-11-10', content: '<h2>논문지도 일정</h2><p>교수 연구실의 논문지도 메뉴에서 연구계획서 버전과 지도 의견을 확인할 수 있습니다.</p><p>개인 상담이 필요한 연구생은 연구실 입장 대화창에 <strong>신청</strong>을 남겨 주세요.</p>', pinned: false },
   { id: 3, category: '시설 이용', title: '개인 공간 출입 안내', author: '캠퍼스 운영팀', createdAt: '2026-11-09', content: '<h2>개인 공간 이용 수칙</h2><p>교수 오피스텔, 개인 휴게실, 화장실·샤워실은 담당자 본인 외 입장이 제한됩니다.</p><ol><li>공용 공간은 자유롭게 이용합니다.</li><li>독립 공간은 담당자 허락을 먼저 받습니다.</li><li>시설 이용 후에는 원래 상태로 정리합니다.</li></ol>', pinned: false },
+  { id: 4, category: '학습자료', title: '2) 학습자료 랜딩페이지', author: '과목운영책임 교수', createdAt: '2026-11-11', content: '<h2>학습자료 랜딩페이지</h2><p>원우님들의 학습과 연구를 위해 마련한 자료입니다. 세미나 전후 적극 활용해 주시기 바랍니다.</p><p><a href="https://kshan0823-lab.github.io/hycu-doctoral-seminar-2026-11-12/">학습자료 랜딩페이지 열기 ↗</a></p>', pinned: false, linkUrl: 'https://kshan0823-lab.github.io/hycu-doctoral-seminar-2026-11-12/' },
 ]
 
 function parseSavedAnnouncements(raw: string | null) {
@@ -886,7 +887,15 @@ function App() {
   useEffect(() => {
     const saved = window.localStorage.getItem('hycu-demo-announcements')
     const parsed = parseSavedAnnouncements(saved)
-    if (parsed) setAnnouncements(parsed)
+    if (parsed) {
+      const learningLink = initialAnnouncements.find((announcement) => announcement.linkUrl)
+      const hasLearningLink = learningLink && parsed.some((announcement) => announcement.linkUrl === learningLink.linkUrl)
+      const next = learningLink && !hasLearningLink ? [learningLink, ...parsed] : parsed
+      setAnnouncements(next)
+      if (next.length !== parsed.length) {
+        try { window.localStorage.setItem('hycu-demo-announcements', JSON.stringify(next)) } catch { /* demo data only */ }
+      }
+    }
   }, [])
 
   const moveIntoRoom = (room: RoomSpec) => {
@@ -1176,6 +1185,7 @@ function App() {
       createdAt: draft.createdAt || today,
       updatedAt: draft.id ? today : undefined,
       content: sanitizeRichText(draft.content),
+      linkUrl: draft.linkUrl,
     }
     const next = announcements.some((announcement) => announcement.id === savedAnnouncement.id)
       ? announcements.map((announcement) => announcement.id === savedAnnouncement.id ? savedAnnouncement : announcement)
@@ -1259,11 +1269,17 @@ function AttendancePanel({ currentStatus, counts, onChange }: { currentStatus: A
 
 function AnnouncementBoard({ announcements, canManage, feedback, onOpen, onNew }: { announcements: Announcement[]; canManage: boolean; feedback: string; onOpen: (announcement: Announcement) => void; onNew: () => void }) {
   const [collapsed, setCollapsed] = useState(false)
-  return <aside className={`notice-board ${collapsed ? 'collapsed' : ''}`} aria-label="알림터 통합게시판"><div className="notice-board-header"><div><span className="notice-board-kicker">CAMPUS NOTICE</span><strong>알림터 통합게시판</strong></div><div className="notice-board-actions"><span className="notice-board-count">{announcements.length}건</span>{canManage && <button type="button" className="notice-new-button" onClick={onNew}>+ 새 공지</button>}<button type="button" className="panel-toggle" aria-expanded={!collapsed} onClick={() => setCollapsed((value) => !value)}>{collapsed ? '펼치기' : '접기'}</button></div></div>{!collapsed && <>{feedback && <p className="notice-board-feedback" role="status" aria-live="polite">{feedback}</p>}<div className="notice-list">{announcements.length === 0 ? <div className="notice-empty">등록된 공지글이 없습니다.</div> : announcements.map((announcement) => <button type="button" className="notice-item" key={announcement.id} onClick={() => onOpen(announcement)}><span className="notice-item-pin">{announcement.pinned ? '📌' : '•'}</span><span className="notice-item-body"><strong>{announcement.title}</strong><small>{announcement.category} · {announcement.author}</small></span><time dateTime={announcement.createdAt}>{announcement.createdAt.slice(5)}</time></button>)}</div><p className="notice-board-hint">제목을 클릭하면 공지 내용을 확인할 수 있습니다.</p></>}</aside>
+  return <aside className={`notice-board ${collapsed ? 'collapsed' : ''}`} aria-label="알림터 통합게시판"><div className="notice-board-header"><div><span className="notice-board-kicker">CAMPUS NOTICE</span><strong>알림터 통합게시판</strong></div><div className="notice-board-actions"><span className="notice-board-count">{announcements.length}건</span>{canManage && <button type="button" className="notice-new-button" onClick={onNew}>+ 새 공지</button>}<button type="button" className="panel-toggle" aria-expanded={!collapsed} onClick={() => setCollapsed((value) => !value)}>{collapsed ? '펼치기' : '접기'}</button></div></div>{!collapsed && <>{feedback && <p className="notice-board-feedback" role="status" aria-live="polite">{feedback}</p>}<div className="notice-list">{announcements.length === 0 ? <div className="notice-empty">등록된 공지글이 없습니다.</div> : announcements.map((announcement) => <AnnouncementItem key={announcement.id} announcement={announcement} onOpen={onOpen} />)}</div><p className="notice-board-hint">제목을 클릭하면 공지 내용을 확인할 수 있습니다.</p></>}</aside>
+}
+
+function AnnouncementItem({ announcement, onOpen }: { announcement: Announcement; onOpen: (announcement: Announcement) => void }) {
+  const content = <><span className="notice-item-pin">{announcement.pinned ? '📌' : '•'}</span><span className="notice-item-body"><strong>{announcement.title}</strong><small>{announcement.category} · {announcement.author}</small></span><time dateTime={announcement.createdAt}>{announcement.createdAt.slice(5)}</time></>
+  if (announcement.linkUrl) return <a className="notice-item notice-item-link" href={announcement.linkUrl} aria-label={`${announcement.title} 열기`}>{content}</a>
+  return <button type="button" className="notice-item" onClick={() => onOpen(announcement)}>{content}</button>
 }
 
 function AnnouncementDetail({ announcement, canManage, onClose, onEdit, onDelete }: { announcement: Announcement; canManage: boolean; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
-  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="dialog-card announcement-detail" role="dialog" aria-modal="true" aria-labelledby="announcement-detail-title"><div className="dialog-header"><div><span className="eyebrow">{announcement.category}</span><h3 id="announcement-detail-title">{announcement.title}</h3><p className="announcement-meta">{announcement.author} · {announcement.createdAt}{announcement.updatedAt ? ` · 수정 ${announcement.updatedAt}` : ''}</p></div><button className="close-button" onClick={onClose} aria-label="공지 닫기">×</button></div><div className="announcement-content" dangerouslySetInnerHTML={{ __html: sanitizeRichText(announcement.content) }} /><div className="announcement-actions"><button type="button" className="secondary-button" onClick={onClose}>목록으로</button>{canManage && <><button type="button" className="secondary-button" onClick={onEdit}>수정</button><button type="button" className="delete-button" onClick={onDelete}>삭제</button></>}</div></section></div>
+  return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="dialog-card announcement-detail" role="dialog" aria-modal="true" aria-labelledby="announcement-detail-title"><div className="dialog-header"><div><span className="eyebrow">{announcement.category}</span><h3 id="announcement-detail-title">{announcement.title}</h3><p className="announcement-meta">{announcement.author} · {announcement.createdAt}{announcement.updatedAt ? ` · 수정 ${announcement.updatedAt}` : ''}</p></div><button className="close-button" onClick={onClose} aria-label="공지 닫기">×</button></div><div className="announcement-content" dangerouslySetInnerHTML={{ __html: sanitizeRichText(announcement.content) }} /><div className="announcement-actions"><button type="button" className="secondary-button" onClick={onClose}>목록으로</button>{announcement.linkUrl && <a className="secondary-button notice-link-button" href={announcement.linkUrl}>학습페이지 열기 →</a>}{canManage && <><button type="button" className="secondary-button" onClick={onEdit}>수정</button><button type="button" className="delete-button" onClick={onDelete}>삭제</button></>}</div></section></div>
 }
 
 function RichTextToolbar() {
@@ -1296,7 +1312,7 @@ function AnnouncementEditor({ announcement, displayName, onClose, onSave }: { an
     const plainText = content.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
     if (!title.trim()) { setError('공지 제목을 입력해 주세요.'); return }
     if (!plainText) { setError('공지 내용을 입력해 주세요.'); return }
-    onSave({ id: announcement?.id ?? 0, category, title, author: displayName, createdAt: announcement?.createdAt ?? '', updatedAt: announcement?.updatedAt, content: sanitizeRichText(content), pinned })
+    onSave({ id: announcement?.id ?? 0, category, title, author: displayName, createdAt: announcement?.createdAt ?? '', updatedAt: announcement?.updatedAt, content: sanitizeRichText(content), pinned, linkUrl: announcement?.linkUrl })
   }
   return <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="dialog-card announcement-editor" role="dialog" aria-modal="true" aria-labelledby="announcement-editor-title"><div className="dialog-header"><div><span className="eyebrow">NOTICE EDITOR</span><h3 id="announcement-editor-title">{announcement ? '공지글 수정' : '새 공지글 작성'}</h3></div><button className="close-button" onClick={onClose} aria-label="편집 닫기">×</button></div><div className="announcement-form"><label>공지 제목<input className="announcement-title-input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="공지 제목을 입력해 주세요." autoFocus /></label><div className="announcement-form-row"><label>분류<select value={category} onChange={(event) => setCategory(event.target.value)}><option>캠퍼스 안내</option><option>논문지도</option><option>시설 이용</option><option>수업 일정</option><option>기타</option></select></label><label className="pin-check"><input type="checkbox" checked={pinned} onChange={(event) => setPinned(event.target.checked)} /> 상단 고정</label></div><div className="rich-editor-label">공지 내용</div><RichTextToolbar /><div key={editorKey} className="rich-editor" contentEditable suppressContentEditableWarning dangerouslySetInnerHTML={{ __html: sanitizeRichText(content) }} onInput={(event) => setContent(event.currentTarget.innerHTML)} role="textbox" aria-label="공지 내용 편집" />{error && <div className="announcement-status" role="alert">{error}</div>}<div className="announcement-editor-note">작성자: {displayName} · 저장 내용은 이 브라우저의 시연 기록에 보관됩니다.</div><div className="announcement-actions"><button type="button" className="secondary-button" onClick={onClose}>취소</button><button type="button" className="primary-button" onClick={submit}>공지 저장 <span>→</span></button></div></div></section></div>
 }
